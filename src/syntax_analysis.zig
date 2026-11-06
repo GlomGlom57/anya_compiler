@@ -76,7 +76,7 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
     var expecting_id = false;
     var expecting_value = false;
     var expecting_section = false;
-    var inside_func = false;
+    var expecting_operands: u8 = 0;
 
     var section: Section = undefined;
 
@@ -85,30 +85,36 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
         const content = token.content;
 
         // Expect section
-        if (content == SECTION) {
-            expecting_section = true;
-            continue;
+        if (!expecting_section) {
+            if (std.mem.eql(u8, content, SECTION[0..])) {
+                expecting_section = true;
+                continue;
+            } else {
+                std.log.err("Trying to create instructions before defining section at line {d}: {s}", .{ line, content });
+                std.process.exit(1);
+            }
         }
 
         // Get section
         if (expecting_section) {
-            section = switch (content) {
-                IMPORTS => Section.Imports,
-                DATA => Section.Data,
-                TEXT => Section.Text,
+            section = if (std.mem.eql(u8, content, IMPORTS[0..])) Section.Imports else if (std.mem.eql(u8, content, DATA[0..])) Section.Data else if (std.mem.eql(u8, content, TEXT[0..])) Section.Text else {
+                std.log.err("Invalid section type at line {d}: {s}", .{ line, content });
+                std.process.exit(1);
             };
+
             expecting_section = false;
             continue;
         }
 
         switch (section) {
-            IMPORTS => imports.append(gpa, content),
-            DATA => {
+            Section.Imports => imports.append(gpa, content),
+
+            Section.Data => {
                 if (!expecting_id and !expecting_value) {
                     expecting_id = switch (content) {
                         U8U, I8U, U16U, I16U => true,
                         else => {
-                            std.log.err("Invalid data '{s}' type at line {d}.", .{ content, line });
+                            std.log.err("Invalid data '{s}' type at line {d}, or trying to create reserved data when it must be unreserved.", .{ content, line });
                             std.process.exit(1);
                         },
                     };
@@ -117,7 +123,25 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                     expecting_id = false;
                 } else if (expecting_value) expecting_value = false;
             },
-            TEXT => {},
+
+            Section.Text => {
+                if (expecting_operands == 0) {
+                    switch (content) {
+                        // Two operand instructions
+                        PIX_F, PIX_M => expecting_operands = 2,
+
+                        // One operand instructions
+                        U8R, U8U, I8U, I8R, U16R, U16U, I16U, I16R, ADD, SUB, MPL, DIV, JMP, JMP_N, JMP_NZ, JMP_P, JMP_Z, CALL, RET, SP_ADD, SP_SUB, LOAD_C, LOAD_S16, LOAD_S8, LOAD_U16, LOAD_U8, GET_DIR, GET_VAL, STORE, WAIT, RECV => expecting_operands = 1,
+
+                        // Zero operand instructions
+                        PRIORITY_ON, PRIORITY_OFF, CLEAR_W, CLEAR_B, SHOW, END => {},
+                        else => {
+                            std.log.err("Invalid instruction at line {d}: {s}", .{ line, content });
+                            std.process.exit(1);
+                        },
+                    }
+                } else expecting_operands -= 1;
+            },
         }
     }
 }

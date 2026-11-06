@@ -1,5 +1,6 @@
 const std = @import("std");
 const la = @import("lexical_analysis.zig");
+const sa = @import("syntax_analysis.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -29,4 +30,9 @@ pub fn main(init: std.process.Init) !void {
         tokens.deinit(gpa);
     }
     try la.lexical_analysis(content, &tokens, gpa);
+
+    var imports = try std.ArrayList([]u8).initCapacity(gpa, 0);
+    defer imports.deinit(gpa);
+
+    try sa.syntax_analysis(tokens, &imports, gpa);
 }
