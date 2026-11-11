@@ -1,6 +1,7 @@
 const i8_middle = 127;
 const i16_middle = 32768;
 
+// Test
 const DataType = enum {
     U8,
     I8,
