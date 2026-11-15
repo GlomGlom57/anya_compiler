@@ -1,2 +1,8 @@
 section .data
-    u8u fresh 10
+    u8u max2 10
+endsection
+
+section .text
+    startx:
+        u8u x
+endsection

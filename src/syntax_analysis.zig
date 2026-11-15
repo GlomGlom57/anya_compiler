@@ -83,9 +83,9 @@ const Section = enum {
 };
 
 pub const Constant = struct {
-    id: []u8,
-    datatype: []u8,
-    value: []u8,
+    id: []const u8,
+    datatype: []const u8,
+    value: []const u8,
 };
 
 pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList([]const u8), functions: *std.ArrayList([]const u8), constants: *std.ArrayList(Constant), gpa: std.mem.Allocator) !void {
@@ -158,6 +158,13 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                         std.process.exit(1);
                     }
                 } else if (expecting_id) { // Const ID
+                    // Verify if the const already exists
+                    for (constants.items) |c| {
+                        if (std.mem.eql(u8, c.id, content[0..])) {
+                            std.log.err("Trying to create const {s} at line {d} that already exists.", .{ content, line });
+                            std.process.exit(1);
+                        }
+                    }
                     tmp_const.id = content;
                     expecting_value = true;
                     expecting_id = false;
@@ -173,7 +180,7 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                 if (content[content.len - 1] == ':') {
                     for (functions.items) |f| {
                         if (std.mem.eql(u8, f, content[0 .. content.len - 1])) {
-                            std.log.err("Trying to create a function {s} at line {d} that already exists.", .{ content, line });
+                            std.log.err("Trying to create a function {s} at line {d} that already exists.", .{ f, line });
                             std.process.exit(1);
                         }
                     }

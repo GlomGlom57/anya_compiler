@@ -2,7 +2,7 @@ const std = @import("std");
 
 const separator = ',';
 
-pub const Token = struct { line: u32, content: []u8 };
+pub const Token = struct { line: u32, content: []const u8 };
 
 pub fn lexical_analysis(content: []const u8, tokens: *std.ArrayList(Token), gpa: std.mem.Allocator) !void {
     var ara = std.heap.ArenaAllocator.init(std.heap.page_allocator);
