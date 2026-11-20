@@ -3,6 +3,11 @@ const la = @import("lexical_analysis.zig");
 const sa = @import("syntax_analysis.zig");
 const sma = @import("semantic_analysis.zig");
 
+fn deinitTokens(tokens: *std.ArrayList(la.Token), gpa: std.mem.Allocator) void {
+    for (tokens.items) |token| gpa.free(token.content);
+    tokens.deinit(gpa);
+}
+
 fn analyze(file: []const u8, io: std.Io, gpa: std.mem.Allocator, stdout: *std.Io.Writer, imports: *std.ArrayList([]const u8), functions: *std.ArrayList([]const u8), constants: *std.ArrayList(sa.Constant), files: *std.ArrayList(sma.FileContent), is_main: bool) !void {
     // Read file
     const content = std.Io.Dir.cwd().readFileAlloc(io, file, gpa, .unlimited) catch |e| {
@@ -13,6 +18,7 @@ fn analyze(file: []const u8, io: std.Io, gpa: std.mem.Allocator, stdout: *std.Io
     defer gpa.free(content);
 
     var tokens = try std.ArrayList(la.Token).initCapacity(gpa, 0);
+    defer deinitTokens(&tokens, gpa);
 
     try stdout.print("{s} lexical analysis... ", .{file});
     try stdout.flush();
@@ -20,9 +26,16 @@ fn analyze(file: []const u8, io: std.Io, gpa: std.mem.Allocator, stdout: *std.Io
     try stdout.print("OK.\n", .{});
     try stdout.flush();
 
+    var file_content: sma.FileContent = .{ .file = file, .functions = try std.ArrayList(sma.Function).initCapacity(gpa, 0) };
+    defer file_content.functions.deinit(gpa);
+
     try stdout.print("{s} syntax analysis... ", .{file});
     try stdout.flush();
-    try sa.syntax_analysis(tokens, imports, functions, constants, gpa);
+    try sa.syntax_analysis(&file_content, tokens, imports, functions, constants, gpa);
+
+    try files.append(gpa, file_content);
+    file_content.functions = .empty;
+
     try stdout.print("OK.\n", .{});
     try stdout.flush();
 
@@ -36,40 +49,12 @@ fn analyze(file: []const u8, io: std.Io, gpa: std.mem.Allocator, stdout: *std.Io
             if (i >= len) break;
 
             const import = imports.items[i];
-            if (!std.mem.eql(u8, import, file[0..])) {
-                try analyze(import, io, gpa, stdout, imports, functions, constants, files, false);
-                const f = sma.FileContent{ .file = file, .tokens = tokens };
-                try files.append(gpa, f);
-
-                // Verify repeated consts
-                for (constants.items, 0..) |constant1, j| {
-                    for (constants.items, 0..) |costant2, k| {
-                        if (std.mem.eql(u8, constant1.id, costant2.id[0..]) and j != k) {
-                            std.log.err("Repeated const: {s}", .{constant1.id});
-                            std.process.exit(1);
-                        }
-                    }
-                }
-
-                // Verify repeated functions
-                for (functions.items, 0..) |fn1, j| {
-                    for (functions.items, 0..) |fn2, k| {
-                        if (std.mem.eql(u8, fn1, fn2[0..]) and j != k) {
-                            std.log.err("Repeated function: {s}", .{fn1});
-                            std.process.exit(1);
-                        }
-                    }
-                }
-            }
+            if (!std.mem.eql(u8, import, file[0..])) try analyze(import, io, gpa, stdout, imports, functions, constants, files, false);
             i += 1;
         }
 
         try stdout.print("\tImports readed.\n", .{});
         try stdout.flush();
-
-        for (constants.items) |constant| {
-            std.log.info("id: {s}|type: {s}| value: {s}", .{ constant.id, constant.datatype, constant.value });
-        }
     }
 }
 
@@ -89,15 +74,20 @@ pub fn main(init: std.process.Init) !void {
     var imports = try std.ArrayList([]const u8).initCapacity(gpa, 0);
     defer {
         for (imports.items) |import| gpa.free(import);
-
         imports.deinit(gpa);
     }
 
     var functions = try std.ArrayList([]const u8).initCapacity(gpa, 0);
-    defer functions.deinit(gpa);
+    defer {
+        for (functions.items) |function| gpa.free(function);
+        functions.deinit(gpa);
+    }
 
     var constants = try std.ArrayList(sa.Constant).initCapacity(gpa, 0);
-    defer constants.deinit(gpa);
+    defer {
+        for (constants.items) |*constant| constant.deinit(gpa);
+        constants.deinit(gpa);
+    }
 
     var buffer: [1024]u8 = undefined;
     var stdout = std.Io.File.stdout();
@@ -105,15 +95,32 @@ pub fn main(init: std.process.Init) !void {
 
     var files = try std.ArrayList(sma.FileContent).initCapacity(gpa, 0);
     defer {
+        for (files.items) |*file| {
+            for (file.functions.items) |*function| {
+                gpa.free(function.id);
+                deinitTokens(&function.tokens, gpa);
+            }
+            file.functions.deinit(gpa);
+        }
         files.deinit(gpa);
     }
 
     try analyze(args[1], io, gpa, &writer.interface, &imports, &functions, &constants, &files, true);
 
-    try writer.interface.print("\tSemantic analysis... ", .{});
+    try writer.interface.print("\tFunctions... \n", .{});
     try writer.interface.flush();
 
-    try sma.semantic_analisys(constants, &writer.interface, gpa);
+    for (functions.items) |f| {
+        std.log.info("{s}", .{f});
+    }
+
+    try writer.interface.print("\n", .{});
+    try writer.interface.flush();
+
+    try writer.interface.print("\tSemantic analysis... \n", .{});
+    try writer.interface.flush();
+
+    try sma.semantic_analisys(files, constants, functions, &writer.interface, gpa);
 
     try writer.interface.print("\tAll analysis completed.\n", .{});
     try writer.interface.flush();

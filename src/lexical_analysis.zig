@@ -17,8 +17,7 @@ pub fn lexical_analysis(content: []const u8, tokens: *std.ArrayList(Token), gpa:
 
         if ((c == ' ' or c == '\n' or c == '\t') and !is_string) {
             if (buffer.items.len != 0) {
-                const copy = try gpa.dupe(u8, buffer.items);
-                try tokens.append(gpa, Token{ .line = curr_line, .content = copy });
+                try tokens.append(gpa, Token{ .line = curr_line, .content = try gpa.dupe(u8, buffer.items) });
                 buffer.clearRetainingCapacity();
             }
             if (c == '\n') curr_line += 1;
@@ -29,8 +28,7 @@ pub fn lexical_analysis(content: []const u8, tokens: *std.ArrayList(Token), gpa:
             is_string = !is_string;
 
             if (buffer.items.len != 0) {
-                const copy = try gpa.dupe(u8, buffer.items);
-                try tokens.append(gpa, Token{ .line = curr_line, .content = copy });
+                try tokens.append(gpa, Token{ .line = curr_line, .content = try gpa.dupe(u8, buffer.items) });
                 buffer.clearRetainingCapacity();
             }
 
@@ -39,9 +37,7 @@ pub fn lexical_analysis(content: []const u8, tokens: *std.ArrayList(Token), gpa:
 
         if (c == separator and !is_string) {
             if (buffer.items.len != 0) {
-                const copy = try gpa.dupe(u8, buffer.items);
-                try tokens.append(gpa, Token{ .line = curr_line, .content = copy });
-
+                try tokens.append(gpa, Token{ .line = curr_line, .content = try gpa.dupe(u8, buffer.items) });
                 buffer.clearRetainingCapacity();
             }
             continue;

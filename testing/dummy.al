@@ -1,8 +1,10 @@
 section .data
-    u8u max2 10
+    u8u min 10
+    s8u neg -126
+    s8u max1 127
 endsection
 
 section .text
-    startx:
+    starx:
         u8u x
 endsection

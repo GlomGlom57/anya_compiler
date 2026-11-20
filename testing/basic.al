@@ -6,7 +6,7 @@ endsection
 section .data
     u8u max 18
     u8u age 22
-    u16u t -10
+    u16u t 10
 endsection
 
 section .text
@@ -17,7 +17,7 @@ section .text
         @loadc max
         @store tmpmax
 
-        prioroff
+        @prioroff
         @loadc age
         sub tmpmax
 

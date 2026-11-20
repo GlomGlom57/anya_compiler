@@ -1,79 +1,7 @@
 const std = @import("std");
 const la = @import("lexical_analysis.zig");
 const sma = @import("semantic_analysis.zig");
-
-// Sections
-const SECTION = "section";
-const IMPORTS = ".imports";
-const DATA = ".data";
-const TEXT = ".text";
-const ENDSECTION = "endsection";
-
-// Data
-const U8U = "u8u";
-const I8U = "s8u";
-const U16U = "u16u";
-const I16U = "s16u";
-
-const U8R = "u8r";
-const I8R = "s8r";
-const U16R = "u16r";
-const I16R = "s16r";
-
-// Math
-const ADD = "add";
-const SUB = "sub";
-const MPL = "mpl";
-const DIV = "div";
-const PRIORITY_ON = "prioron";
-const PRIORITY_OFF = "prioroff";
-
-// Jumps
-const JMP = "jmp";
-const JMP_P = "jmpp";
-const JMP_N = "jmpn";
-const JMP_Z = "jmpz";
-const JMP_NZ = "jmpnz";
-
-// Functions
-const CALL = "call";
-const RET = "ret";
-
-// Memory
-//  SRAM Pointer
-const SP_ADD = "@spadd";
-const SP_SUB = "@spsub";
-
-//  Loads
-const LOAD_C = "@loadc";
-const LOAD_U8 = "@loadu8";
-const LOAD_S8 = "@loads8";
-const LOAD_U16 = "@loadu16";
-const LOAD_S16 = "@loads16";
-
-//  SRAM Dirs and Values
-const GET_VAL = "@getv";
-const GET_DIR = "@getd";
-const STORE = "@store";
-
-// Screen
-const CLEAR_W = ">clearw";
-const CLEAR_B = ">clearb";
-const PIX_ON_F = ">pixon_f";
-const PIX_OFF_F = ">pixoff_f";
-const PIX_ON_M = ">pixon_m";
-const PIX_OFF_M = ">pixoff_m";
-const SHOW = ">show";
-
-// Game
-const WAIT = "wait";
-const RECV = "recv";
-const END = "end";
-
-const UNRESERVED_TYPES = [_][]const u8{ U8U, I8U, U16U, I16U };
-const TWO_OPERAND_INSTRUCTIONS = [_][]const u8{ PIX_ON_F, PIX_OFF_F, PIX_ON_M, PIX_OFF_M };
-const ONE_OPERAND_INSTRUCTIONS = [_][]const u8{ U8R, U8U, I8U, I8R, U16R, U16U, I16U, I16R, ADD, SUB, MPL, DIV, JMP, JMP_N, JMP_NZ, JMP_P, JMP_Z, CALL, RET, SP_ADD, SP_SUB, LOAD_C, LOAD_S16, LOAD_S8, LOAD_U16, LOAD_U8, GET_DIR, GET_VAL, STORE, WAIT, RECV };
-const ZERO_OPERAND_INSTRUCTIONS = [_][]const u8{ PRIORITY_ON, PRIORITY_OFF, CLEAR_W, CLEAR_B, SHOW, END };
+const kw = @import("keywords.zig");
 
 const Section = enum {
     Imports,
@@ -86,22 +14,33 @@ pub const Constant = struct {
     id: []const u8,
     datatype: []const u8,
     value: []const u8,
+
+    pub fn deinit(self: *Constant, gpa: std.mem.Allocator) void {
+        gpa.free(self.id);
+        gpa.free(self.datatype);
+        gpa.free(self.value);
+    }
 };
 
-pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList([]const u8), functions: *std.ArrayList([]const u8), constants: *std.ArrayList(Constant), gpa: std.mem.Allocator) !void {
+pub fn syntax_analysis(file_content: *sma.FileContent, tokens: std.ArrayList(la.Token), imports: *std.ArrayList([]const u8), functions: *std.ArrayList([]const u8), constants: *std.ArrayList(Constant), gpa: std.mem.Allocator) !void {
     var expecting_id = false;
     var expecting_value = false;
     var expecting_section = false;
     var expecting_operands: u8 = 0;
+    var in_func = false;
 
     var section: Section = Section.NoSection;
     var tmp_const: Constant = undefined;
+    var func: sma.Function = .{
+        .id = undefined,
+        .tokens = .empty,
+    };
 
     for (tokens.items) |token| {
         const line = token.line;
         const content = token.content;
 
-        if (std.mem.eql(u8, content, ENDSECTION[0..])) {
+        if (std.mem.eql(u8, content, kw.ENDSECTION[0..])) {
             section = Section.NoSection;
             continue;
         }
@@ -110,7 +49,7 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
             Section.NoSection => {
                 // Expect section
                 if (!expecting_section) {
-                    if (std.mem.eql(u8, content, SECTION[0..])) {
+                    if (std.mem.eql(u8, content, kw.SECTION[0..])) {
                         expecting_section = true;
                     } else {
                         std.log.err("Trying to create instructions before defining section at line {d}: {s}", .{ line, content });
@@ -118,7 +57,7 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                     }
                 } else {
                     // Get section
-                    section = if (std.mem.eql(u8, content, IMPORTS[0..])) Section.Imports else if (std.mem.eql(u8, content, DATA[0..])) Section.Data else if (std.mem.eql(u8, content, TEXT[0..])) Section.Text else {
+                    section = if (std.mem.eql(u8, content, kw.IMPORTS[0..])) Section.Imports else if (std.mem.eql(u8, content, kw.DATA[0..])) Section.Data else if (std.mem.eql(u8, content, kw.TEXT[0..])) Section.Text else {
                         std.log.err("Invalid section type at line {d}: {s}", .{ line, content });
                         std.process.exit(1);
                     };
@@ -136,7 +75,7 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                 }
 
                 if (!already_imported) {
-                    const import_copy = try gpa.dupe(u8, token.content);
+                    const import_copy = try gpa.dupe(u8, content);
                     try imports.append(gpa, import_copy);
                 }
             },
@@ -144,11 +83,11 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
             Section.Data => {
                 if (!expecting_id and !expecting_value) {
                     var found = false;
-                    for (0..UNRESERVED_TYPES.len) |i| {
-                        if (std.mem.eql(u8, content, UNRESERVED_TYPES[i][0..])) {
+                    for (0..kw.UNRESERVED_TYPES.len) |i| {
+                        if (std.mem.eql(u8, content, kw.UNRESERVED_TYPES[i][0..])) {
                             expecting_id = true;
                             found = true;
-                            tmp_const.datatype = content;
+                            tmp_const.datatype = try gpa.dupe(u8, content);
                             break;
                         }
                     }
@@ -165,11 +104,11 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                             std.process.exit(1);
                         }
                     }
-                    tmp_const.id = content;
+                    tmp_const.id = try gpa.dupe(u8, content);
                     expecting_value = true;
                     expecting_id = false;
                 } else if (expecting_value) {
-                    tmp_const.value = content;
+                    tmp_const.value = try gpa.dupe(u8, content);
                     try constants.append(gpa, tmp_const);
                     expecting_value = false;
                 }
@@ -184,7 +123,17 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                             std.process.exit(1);
                         }
                     }
-                    try functions.append(gpa, content[0 .. content.len - 1]);
+
+                    if (!in_func) {
+                        func = .{ .id = try gpa.dupe(u8, content), .tokens = try std.ArrayList(la.Token).initCapacity(gpa, 0) };
+                        in_func = true;
+                    } else {
+                        try file_content.functions.append(gpa, func);
+                        func = .{ .id = try gpa.dupe(u8, content), .tokens = try std.ArrayList(la.Token).initCapacity(gpa, 0) };
+                    }
+
+                    const copy = try gpa.dupe(u8, content[0 .. content.len - 1]);
+                    try functions.append(gpa, copy);
                     continue;
                 }
 
@@ -193,8 +142,8 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                     var found = false;
 
                     // Two operand instructions
-                    for (0..TWO_OPERAND_INSTRUCTIONS.len) |i| {
-                        if (std.mem.eql(u8, content, TWO_OPERAND_INSTRUCTIONS[i][0..])) {
+                    for (0..kw.TWO_OPERAND_INSTRUCTIONS.len) |i| {
+                        if (std.mem.eql(u8, content, kw.TWO_OPERAND_INSTRUCTIONS[i][0..])) {
                             expecting_operands = 2;
                             found = true;
                             break;
@@ -202,8 +151,8 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                     }
 
                     if (!found) {
-                        for (0..ONE_OPERAND_INSTRUCTIONS.len) |i| {
-                            if (std.mem.eql(u8, content, ONE_OPERAND_INSTRUCTIONS[i][0..])) {
+                        for (0..kw.ONE_OPERAND_INSTRUCTIONS.len) |i| {
+                            if (std.mem.eql(u8, content, kw.ONE_OPERAND_INSTRUCTIONS[i][0..])) {
                                 expecting_operands = 1;
                                 found = true;
                                 break;
@@ -212,8 +161,8 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                     }
 
                     if (!found) {
-                        for (0..ZERO_OPERAND_INSTRUCTIONS.len) |i| {
-                            if (std.mem.eql(u8, content, ZERO_OPERAND_INSTRUCTIONS[i][0..])) {
+                        for (0..kw.ZERO_OPERAND_INSTRUCTIONS.len) |i| {
+                            if (std.mem.eql(u8, content, kw.ZERO_OPERAND_INSTRUCTIONS[i][0..])) {
                                 found = true;
                                 break;
                             }
@@ -225,7 +174,13 @@ pub fn syntax_analysis(tokens: std.ArrayList(la.Token), imports: *std.ArrayList(
                         std.process.exit(1);
                     }
                 } else expecting_operands -= 1; // Is parameter
+                try func.tokens.append(gpa, .{
+                    .line = token.line,
+                    .content = try gpa.dupe(u8, token.content),
+                });
             },
         }
     }
+
+    if (in_func) try file_content.functions.append(gpa, func);
 }
